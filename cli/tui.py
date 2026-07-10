@@ -1,16 +1,20 @@
 import asyncio
+import os
+import shutil
+import subprocess
 import sys
 import time
 import json
 from datetime import datetime
 from typing import Optional
 
-from cli.session import create_session, save_session
+from cli.session import create_session, save_session, list_sessions, delete_session
 from cli.stats import usage_stats
 from cli.ui import (
     RICH_AVAILABLE, console, print_banner, print_thinking,
     print_tool_call, print_tool_result, print_info, print_warning,
     print_error, print_done, input_with_prompt, confirm_action,
+    print_sessions_table,
 )
 
 try:
@@ -28,11 +32,139 @@ except ImportError:
     HAVE_LIVE = False
 
 
+SLASH_COMMANDS = {
+    "/help": "Show available slash commands",
+    "/new": "Start a new session",
+    "/exit": "Exit OpenManus",
+    "/clear": "Clear the terminal screen",
+    "/models": "List configured models",
+    "/sessions": "List all sessions",
+    "/export": "Export current session as JSON",
+    "/compact": "Summarize conversation to save tokens",
+    "/agent": "Show current agent info",
+    "/connect": "Add a new provider",
+    "/stats": "Show usage statistics",
+}
+
+
 def _format_model(model: str) -> str:
     if model and "/" in model:
         parts = model.split("/", 1)
         return parts[1] if parts[0] in ("z-ai",) else model
     return model or "unknown"
+
+
+async def _handle_slash(cmd: str, args: str, session: "InteractiveSession") -> bool:
+    """Handle a slash command. Returns True if the command was handled."""
+    match cmd:
+        case "/help":
+            print("\n  Slash Commands:")
+            for name, desc in SLASH_COMMANDS.items():
+                print(f"    {name:<20} {desc}")
+            print()
+            return True
+
+        case "/new":
+            session.messages = []
+            session.session_id = create_session()
+            save_session(session.session_id, session.messages)
+            print_info("New session started")
+            return True
+
+        case "/exit":
+            return False
+
+        case "/clear":
+            os.system("clear" if os.name == "posix" else "cls")
+            return True
+
+        case "/models":
+            from app.config import config
+            for name, settings in config.llm.items():
+                model = settings.model or "?self._mode"
+                url = settings.base_url or ""
+                print(f"  {name:<12} {model:<30} {url}")
+            return True
+
+        case "/sessions":
+            sessions = list_sessions()
+            if not sessions:
+                print_info("No sessions found.")
+            else:
+                print_sessions_table(sessions)
+            return True
+
+        case "/export":
+            from cli.export_import import export_session
+            path = export_session(session.session_id)
+            if path:
+                print_info(f"Exported session {session.session_id[:8]} to {path}")
+            else:
+                print_error("Session export failed")
+            return True
+
+        case "/compact":
+            if len(session.messages) < 4:
+                print_info("Conversation too short to compact")
+                return True
+            try:
+                from app.schema import Message
+                text = "\n".join(
+                    m.get("content", "") or ""
+                    for m in session.messages
+                    if m.get("role") in ("user", "assistant")
+                )
+                summary = await session.agent.llm.ask(
+                    messages=[Message.user_message(
+                        f"Summarize this conversation concisely, keeping key details:\n\n{text[-3000:]}"
+                    )],
+                    stream=False,
+                )
+                session.messages = [
+                    {"role": "user", "content": f"Previous conversation summary:\n{summary}"}
+                ]
+                print_info("Conversation compacted")
+            except Exception as e:
+                print_error(f"Compact failed: {e}")
+            return True
+
+        case "/agent":
+            print_info(f"Agent: {session.agent_name}")
+            print_info(f"Model: {_format_model(session._model)}")
+            print_info(f"Session: {session.session_id[:8]}")
+            print_info(f"Messages: {len(session.messages)}")
+            return True
+
+        case "/connect":
+            print_info("Connecting...")
+            try:
+                from cli.providers import add_provider as _add, KNOWN_PROVIDERS
+                name = args or input("  Provider name: ").strip()
+                if not name:
+                    return True
+                if name.lower() in KNOWN_PROVIDERS:
+                    info = KNOWN_PROVIDERS[name.lower()]
+                    _add(name, info["models"][0] if info["models"] else "", info["base_url"], "", set_default=True)
+                else:
+                    model = input("  Model: ").strip()
+                    url = input("  Base URL: ").strip()
+                    key = input("  API key: ").strip()
+                    _add(name, model, url, key, set_default=True)
+                print_done(f"Provider '{name}' added")
+            except Exception as e:
+                print_error(f"Connect failed: {e}")
+            return True
+
+        case "/stats":
+            stats = usage_stats.get_summary()
+            for k, v in stats.items():
+                print(f"  {k:<22} {v}")
+            return True
+
+        case _:
+            print_error(f"Unknown command: {cmd}")
+            print_info("Type /help for available commands")
+            return True
 
 
 class InteractiveSession:
@@ -48,9 +180,6 @@ class InteractiveSession:
         self.messages = []
         self.agent = None
         self.start_time = None
-
-    def _agent_line(self) -> str:
-        return f"> {self.agent_name} \u00b7 {_format_model(self._model)}"
 
     async def start(self):
         if self.mini:
@@ -99,6 +228,15 @@ class InteractiveSession:
                 if prompt.lower() in ("exit", "quit", "q"):
                     break
                 if not prompt.strip():
+                    continue
+
+                if prompt.startswith("/"):
+                    parts = prompt.split(None, 1)
+                    cmd = parts[0].lower()
+                    args = parts[1] if len(parts) > 1 else ""
+                    handled = await _handle_slash(cmd, args, self)
+                    if not handled:
+                        break
                     continue
 
                 self.messages.append({"role": "user", "content": prompt})
