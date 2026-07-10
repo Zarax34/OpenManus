@@ -358,6 +358,7 @@ class InteractiveSession:
                 await self.agent.cleanup()
 
     async def _run_agent(self, prompt: str):
+        print(f"  > {prompt}")
         status = Live(Spinner("dots", text="", style="dim"), console=console, refresh_per_second=10)
         status.start()
 

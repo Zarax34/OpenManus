@@ -319,34 +319,27 @@ def _setup_readline():
 
 def input_with_prompt(prompt: str = ">", allow_empty=False) -> str:
     try:
-        import readline
-        cmds = [c for c, _ in SLASH_COMMANDS_HELP]
-        def complete(text, state):
-            if state == 0:
-                if text.startswith("/"):
-                    matches[:] = [c for c in cmds if c.startswith(text)]
-                else:
-                    matches[:] = []
-            return matches[state] if state < len(matches) else None
-        matches = []
-        readline.set_completer(complete)
-        readline.parse_and_bind("tab: complete")
-    except ImportError:
-        pass
-
-    try:
         result = input(f"> ")
     except (EOFError, KeyboardInterrupt):
         return ""
-    if result == "/":
-        print()
-        for cmd, desc in SLASH_COMMANDS_HELP:
-            print(f"  {cmd:<18} {desc}")
-        print()
-        try:
-            result = input(f"> ")
-        except (EOFError, KeyboardInterrupt):
-            return ""
+
+    if result.startswith("/"):
+        cmds = [c for c, _ in SLASH_COMMANDS_HELP]
+        matches = [c for c in cmds if c.startswith(result)]
+        if result == "/":
+            print()
+            for cmd, desc in SLASH_COMMANDS_HELP:
+                print(f"  {cmd:<16} {desc}")
+            print()
+        elif len(matches) == 1:
+            result = matches[0]
+        elif len(matches) > 1:
+            print()
+            for c in matches:
+                desc = next(d for cmd, d in SLASH_COMMANDS_HELP if cmd == c)
+                print(f"  {c:<16} {desc}")
+            print()
+
     return result
 
 
