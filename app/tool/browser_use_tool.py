@@ -4,7 +4,10 @@ import json
 from typing import Generic, Optional, TypeVar
 
 from browser_use import Browser as BrowserUseBrowser
-from browser_use import BrowserConfig
+try:
+    from browser_use import BrowserConfig
+except ImportError:
+    BrowserConfig = None
 from browser_use.browser.context import BrowserContext, BrowserContextConfig
 from browser_use.dom.service import DomService
 from pydantic import Field, field_validator
