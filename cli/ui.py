@@ -317,25 +317,54 @@ def _setup_readline():
         pass
 
 
+def _show_matches(subst, matches):
+    print()
+    for m in matches:
+        desc = next((d for c, d in SLASH_COMMANDS_HELP if c == m), "")
+        print(f"  {m:<16} {desc}")
+    print(end="> ")
+
+
 def input_with_prompt(prompt: str = ">", allow_empty=False) -> str:
+    import readline
+
+    cmd_list = [c for c, _ in SLASH_COMMANDS_HELP]
+    matches = []
+
+    def complete(text, state):
+        nonlocal matches
+        if state == 0:
+            if text.startswith("/"):
+                matches = [c for c in cmd_list if c.startswith(text)]
+            else:
+                matches = []
+        return matches[state] if state < len(matches) else None
+
+    def display_matches(substitution, matches, longest_match_length):
+        _show_matches(substitution, matches)
+
+    readline.set_completer(complete)
+    readline.parse_and_bind("tab: complete")
+    readline.set_completion_display_matches_hook(display_matches)
+
     try:
         result = input(f"> ")
     except (EOFError, KeyboardInterrupt):
         return ""
 
     if result.startswith("/"):
-        cmds = [c for c, _ in SLASH_COMMANDS_HELP]
-        matches = [c for c in cmds if c.startswith(result)]
+        cmds = cmd_list
+        m = [c for c in cmds if c.startswith(result)]
         if result == "/":
             print()
             for cmd, desc in SLASH_COMMANDS_HELP:
                 print(f"  {cmd:<16} {desc}")
             print()
-        elif len(matches) == 1:
-            result = matches[0]
-        elif len(matches) > 1:
+        elif len(m) == 1:
+            result = m[0]
+        elif len(m) > 1:
             print()
-            for c in matches:
+            for c in m:
                 desc = next(d for cmd, d in SLASH_COMMANDS_HELP if cmd == c)
                 print(f"  {c:<16} {desc}")
             print()
