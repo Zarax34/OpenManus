@@ -75,8 +75,6 @@ async def run_interactive(args):
 
 async def run_single(args):
     """Run agent with a single prompt"""
-    from app.agent.manus import Manus
-
     if args.prompt:
         prompt = args.prompt
     else:
@@ -88,7 +86,18 @@ async def run_single(args):
     session_id = create_session()
     messages = [{"role": "user", "content": prompt}]
 
-    agent = await Manus.create()
+    try:
+        from app.agent.manus import Manus
+        agent = await Manus.create()
+    except ImportError as e:
+        missing = str(e).replace("No module named ", "")
+        print_error(f"Missing dependency: {missing}")
+        print_info("Install required packages: pip install -r requirements.txt")
+        return
+    except Exception as e:
+        print_error(f"Failed to initialize agent: {e}")
+        return
+
     try:
         print_info("Processing your request...")
         result = await agent.run(prompt)

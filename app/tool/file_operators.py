@@ -6,7 +6,9 @@ from typing import Optional, Protocol, Tuple, Union, runtime_checkable
 
 from app.config import SandboxSettings
 from app.exceptions import ToolError
-from app.sandbox.client import SANDBOX_CLIENT
+def _get_sandbox_client():
+    from app.sandbox.client import SANDBOX_CLIENT
+    return SANDBOX_CLIENT
 
 
 PathLike = Union[str, Path]
@@ -97,7 +99,7 @@ class SandboxFileOperator(FileOperator):
     """File operations implementation for sandbox environment."""
 
     def __init__(self):
-        self.sandbox_client = SANDBOX_CLIENT
+        self.sandbox_client = _get_sandbox_client()
 
     async def _ensure_sandbox_initialized(self):
         """Ensure sandbox is initialized."""

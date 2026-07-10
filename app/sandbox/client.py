@@ -2,7 +2,11 @@ from abc import ABC, abstractmethod
 from typing import Dict, Optional, Protocol
 
 from app.config import SandboxSettings
-from app.sandbox.core.sandbox import DockerSandbox
+
+
+def _get_docker_sandbox():
+    from app.sandbox.core.sandbox import DockerSandbox
+    return DockerSandbox
 
 
 class SandboxFileOperations(Protocol):
@@ -88,7 +92,8 @@ class LocalSandboxClient(BaseSandboxClient):
 
     def __init__(self):
         """Initializes local sandbox client."""
-        self.sandbox: Optional[DockerSandbox] = None
+        self.sandbox = None
+        self._DockerSandbox = None
 
     async def create(
         self,
@@ -104,7 +109,9 @@ class LocalSandboxClient(BaseSandboxClient):
         Raises:
             RuntimeError: If sandbox creation fails.
         """
-        self.sandbox = DockerSandbox(config, volume_bindings)
+        if self._DockerSandbox is None:
+            self._DockerSandbox = _get_docker_sandbox()
+        self.sandbox = self._DockerSandbox(config, volume_bindings)
         await self.sandbox.create()
 
     async def run_command(self, command: str, timeout: Optional[int] = None) -> str:

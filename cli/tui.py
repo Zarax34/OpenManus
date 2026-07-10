@@ -43,8 +43,6 @@ class InteractiveSession:
         self.start_time = None
 
     async def start(self):
-        from app.agent.manus import Manus
-
         if not self.mini:
             print_banner()
 
@@ -59,7 +57,17 @@ class InteractiveSession:
             print_info(f"Model: [cyan]{self.model}[/]")
         print_info("[dim]Type 'exit' or Ctrl+C to quit[/]\n")
 
-        self.agent = await Manus.create()
+        try:
+            from app.agent.manus import Manus
+            self.agent = await Manus.create()
+        except ImportError as e:
+            missing = str(e).replace("No module named ", "")
+            print_error(f"Missing dependency: {missing}")
+            print_info("Install required packages: pip install -r requirements.txt")
+            return
+        except Exception as e:
+            print_error(f"Failed to initialize agent: {e}")
+            return
 
         if not self.no_replay and not self.mini:
             console.print("[dim]New session started[/]")
@@ -83,7 +91,8 @@ class InteractiveSession:
             save_session(self.session_id, self.messages)
             usage_stats.track_session()
             print_done(f"Session saved [dim]({elapsed:.1f}s)[/]")
-            await self.agent.cleanup()
+            if self.agent:
+                await self.agent.cleanup()
 
     async def _run_agent(self, prompt: str):
         self.messages.append({"role": "user", "content": prompt})
@@ -104,12 +113,21 @@ class InteractiveSession:
 
 class MiniSession(InteractiveSession):
     async def start(self):
-        from app.agent.manus import Manus
-
         print_banner(mini=True)
         print_info(f"Session: {self.session_id[:8]}")
 
-        self.agent = await Manus.create()
+        try:
+            from app.agent.manus import Manus
+            self.agent = await Manus.create()
+        except ImportError as e:
+            missing = str(e).replace("No module named ", "")
+            print_error(f"Missing dependency: {missing}")
+            print_info("Install required packages: pip install -r requirements.txt")
+            return
+        except Exception as e:
+            print_error(f"Failed to initialize agent: {e}")
+            return
+
         self.start_time = time.time()
 
         try:
@@ -133,7 +151,8 @@ class MiniSession(InteractiveSession):
         finally:
             save_session(self.session_id, self.messages)
             usage_stats.track_session()
-            await self.agent.cleanup()
+            if self.agent:
+                await self.agent.cleanup()
 
 
 def create_session_obj(auto_approve=False, mini=False, no_replay=False,
