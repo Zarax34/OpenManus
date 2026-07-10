@@ -44,6 +44,7 @@ SLASH_COMMANDS = {
     "/agent": "Show current agent info",
     "/connect": "Add a new provider",
     "/stats": "Show usage statistics",
+    "/skill": "List or load a skill (/skill <name> to load)",
 }
 
 
@@ -159,6 +160,28 @@ async def _handle_slash(cmd: str, args: str, session: "InteractiveSession") -> b
             stats = usage_stats.get_summary()
             for k, v in stats.items():
                 print(f"  {k:<22} {v}")
+            return True
+
+        case "/skill":
+            from app.tool.skill import _discover_skills
+            skills = _discover_skills()
+            if args:
+                for s in skills:
+                    if s["name"] == args:
+                        print(f"\n--- {s['name']} ---")
+                        print(s["description"])
+                        print(f"Path: {s['path']}\n")
+                        return True
+                print_error(f"Skill '{args}' not found")
+                return True
+            if not skills:
+                print_info("No skills found")
+                return True
+            print()
+            for s in skills:
+                print(f"  {s['name']:<20} {s['description']}")
+            print()
+            print_info("Use '/skill <name>' to view a skill's content")
             return True
 
         case _:
