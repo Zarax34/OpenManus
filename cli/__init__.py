@@ -3,6 +3,8 @@ import argparse
 import asyncio
 import sys
 
+import os
+
 from cli.commands import (
     run_interactive,
     run_single,
@@ -26,6 +28,7 @@ from cli.commands import (
     cmd_plugin,
     cmd_db,
 )
+from cli.setup import is_first_run, run_setup
 from cli.ui import print_banner, print_info, print_error
 
 
@@ -286,6 +289,12 @@ async def async_main():
 
     # Default: interactive mode
     if not args.command:
+        if is_first_run():
+            try:
+                run_setup()
+            except Exception as e:
+                print_error(f"Setup error: {e}")
+            return
         if args.prompt:
             await run_single(args)
         else:

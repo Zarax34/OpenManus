@@ -220,7 +220,7 @@ class Config:
         example_path = root / "config" / "config.example.toml"
         if example_path.exists():
             return example_path
-        raise FileNotFoundError("No configuration file found in config directory")
+        return config_path
 
     def _load_config(self) -> dict:
         config_path = self._get_config_path()
