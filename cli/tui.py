@@ -123,17 +123,25 @@ class InteractiveSession:
         if not self.mini:
             console.print(Rule(style="dim"))
 
+        status_spinner = Spinner("dots", text="Thinking...", style="cyan")
+        status = Live(status_spinner, console=console, refresh_per_second=10)
+        status.start()
+
         try:
             result = await asyncio.wait_for(self.agent.run(prompt), timeout=300)
+            status.stop()
             self.messages.append({"role": "assistant", "content": str(result) if result else ""})
             save_session(self.session_id, self.messages)
         except asyncio.TimeoutError:
+            status.stop()
             msg = "Request timed out (300s). Check your API key and model name in config."
             print_error(msg)
             self.messages.append({"role": "assistant", "content": msg})
         except asyncio.CancelledError:
+            status.stop()
             print_warning("Task cancelled")
         except Exception as e:
+            status.stop()
             err = str(e)
             if "401" in err or "Unauthorized" in err:
                 msg = "API key is invalid. Run setup again: openmanus"
