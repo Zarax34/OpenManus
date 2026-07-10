@@ -1,5 +1,4 @@
 import asyncio
-import os
 import sys
 import time
 from typing import Optional
@@ -11,7 +10,6 @@ from prompt_toolkit import Application
 from prompt_toolkit.layout import Layout, HSplit, Window, FormattedTextControl
 from prompt_toolkit.widgets import TextArea
 from prompt_toolkit.key_binding import KeyBindings
-from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.application import get_app
 from prompt_toolkit.completion import Completer, Completion
 from prompt_toolkit.styles import Style
@@ -118,7 +116,6 @@ class InteractiveSession:
             height=1,
             prompt="> ",
             multiline=False,
-            accept_handler=self._on_accept,
             completer=_SlashCompleter(SLASH_COMMANDS),
             complete_while_typing=True,
             style="bg:#16213e #e0e0e0",
@@ -134,6 +131,18 @@ class InteractiveSession:
         self._layout = Layout(body, focused_element=self._input_field)
 
         kb = KeyBindings()
+
+        @kb.add("enter")
+        def _enter(event):
+            buf = event.app.layout.current_buffer
+            text = buf.text.strip()
+            buf.text = ""
+            if not text:
+                return
+            self._input_field.read_only = True
+            self._thinking = True
+            event.app.invalidate()
+            asyncio.create_task(self._dispatch(text))
 
         @kb.add("c-c")
         def _exit(event):
@@ -177,82 +186,72 @@ class InteractiveSession:
         except Exception:
             pass
 
-    async def _on_accept(self, buf: Buffer) -> bool:
-        text = buf.text.strip()
-        buf.text = ""
-        if not text:
-            return True
-
-        self._add_msg("class:user.msg", f"> {text}")
-
-        if text.lower() in ("exit", "quit", "q"):
-            get_app().exit()
-            return True
-
-        if text.startswith("/"):
-            parts = text.split(None, 1)
-            cmd = parts[0].lower()
-            args = parts[1] if len(parts) > 1 else ""
-            await self._handle_slash(cmd, args)
-            return True
-
-        if not self.agent:
-            self._add_msg("class:error.msg", "  Agent not initialized. Check config.")
-            return True
-
-        if "@" in text:
-            from app.tool.task import SUB_AGENTS
-            for name in SUB_AGENTS:
-                mention = f"@{name}"
-                if mention in text:
-                    task_prompt = text.replace(mention, "").strip()
-                    self._add_msg("class:info.msg", f"  Invoking @{name}...")
-                    try:
-                        from app.tool.task import Task
-                        t = Task()
-                        res = await t.execute(prompt=task_prompt or "Handle this task", agent=name)
-                        self._add_msg("class:assistant.msg", f"  @{name}: {res}")
-                        self.messages.append({"role": "user", "content": text})
-                        self.messages.append({"role": "assistant", "content": f"[@{name}]: {res}"})
-                        save_session(self.session_id, self.messages)
-                    except Exception as e:
-                        self._add_msg("class:error.msg", f"  @{name} failed: {e}")
-                    return True
-
-        self._input_field.read_only = True
-        self._thinking = True
-        self._invalidate()
+    async def _dispatch(self, text: str):
         try:
-            await self._run_agent(text)
+            self._add_msg("class:user.msg", f"> {text}")
+
+            if text.lower() in ("exit", "quit", "q"):
+                get_app().exit()
+                return
+
+            if text.startswith("/"):
+                parts = text.split(None, 1)
+                cmd = parts[0].lower()
+                args = parts[1] if len(parts) > 1 else ""
+                await self._handle_slash(cmd, args)
+                return
+
+            if not self.agent:
+                self._add_msg("class:error.msg", "  Agent not initialized. Check config.")
+                return
+
+            if "@" in text:
+                from app.tool.task import SUB_AGENTS
+                for name in SUB_AGENTS:
+                    mention = f"@{name}"
+                    if mention in text:
+                        task_prompt = text.replace(mention, "").strip()
+                        self._add_msg("class:info.msg", f"  Invoking @{name}...")
+                        try:
+                            from app.tool.task import Task
+                            t = Task()
+                            res = await t.execute(prompt=task_prompt or "Handle this task", agent=name)
+                            self._add_msg("class:assistant.msg", f"  @{name}: {res}")
+                            self.messages.append({"role": "user", "content": text})
+                            self.messages.append({"role": "assistant", "content": f"[@{name}]: {res}"})
+                            save_session(self.session_id, self.messages)
+                        except Exception as e:
+                            self._add_msg("class:error.msg", f"  @{name} failed: {e}")
+                        return
+
+            try:
+                result = await asyncio.wait_for(self.agent.run(text), timeout=300)
+                out = str(result) if result else ""
+                if out:
+                    self._add_msg("class:assistant.msg", out)
+                self._sync_messages()
+                save_session(self.session_id, self.messages)
+            except asyncio.TimeoutError:
+                self._add_msg("class:error.msg", "  Request timed out (300s). Check config.")
+            except Exception as e:
+                err = str(e)
+                if "401" in err or "Unauthorized" in err:
+                    msg = "Invalid API key. Run: openmanus"
+                elif "404" in err or "not found" in err.lower() or "model" in err.lower():
+                    msg = "Model not found. Check config/config.toml"
+                elif "timeout" in err.lower() or "timed out" in err.lower():
+                    msg = "Request timed out. Check endpoint."
+                else:
+                    msg = f"Error: {err[:200]}"
+                self._add_msg("class:error.msg", f"  {msg}")
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            self._add_msg("class:error.msg", f"  Internal error: {e}")
         finally:
             self._thinking = False
             self._input_field.read_only = False
             self._invalidate()
-        return True
-
-    async def _run_agent(self, text: str):
-        try:
-            result = await asyncio.wait_for(self.agent.run(text), timeout=300)
-            out = str(result) if result else ""
-            if out:
-                self._add_msg("class:assistant.msg", out)
-            self._sync_messages()
-            save_session(self.session_id, self.messages)
-        except asyncio.TimeoutError:
-            self._add_msg("class:error.msg", "  Request timed out (300s). Check config.")
-        except asyncio.CancelledError:
-            pass
-        except Exception as e:
-            err = str(e)
-            if "401" in err or "Unauthorized" in err:
-                msg = "Invalid API key. Run: openmanus"
-            elif "404" in err or "not found" in err.lower() or "model" in err.lower():
-                msg = "Model not found. Check config/config.toml"
-            elif "timeout" in err.lower() or "timed out" in err.lower():
-                msg = "Request timed out. Check endpoint."
-            else:
-                msg = f"Error: {err[:200]}"
-            self._add_msg("class:error.msg", f"  {msg}")
 
     async def _handle_slash(self, cmd: str, args: str):
         match cmd:
