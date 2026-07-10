@@ -309,27 +309,6 @@ class InteractiveSession:
                     self.agent.update_memory("tool", content, tool_call_id=m.get("tool_call_id", ""), name=m.get("name", ""))
             self._sync_messages()
 
-        if not self.mini:
-            from app.schema import Message
-            try:
-                await asyncio.wait_for(
-                    self.agent.llm.ask(
-                        messages=[Message.user_message("ok")],
-                        stream=False,
-                    ),
-                    timeout=15,
-                )
-            except asyncio.TimeoutError:
-                print_warning("LLM connection timed out. Check config.")
-            except Exception as e:
-                err = str(e)
-                if "401" in err:
-                    print_error("Invalid API key. Run: openmanus")
-                elif "404" in err or "not found" in err.lower():
-                    print_error("Model not found. Check config/config.toml")
-                else:
-                    print_warning(f"LLM: {err[:80]}")
-
         self.start_time = time.time()
 
         try:

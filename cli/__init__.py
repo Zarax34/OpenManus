@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 import argparse
 import asyncio
+import os
 import shutil
 import sys
+import warnings
 
-import os
+warnings.filterwarnings("ignore", category=UserWarning)
+warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 from cli.commands import (
     run_interactive,
