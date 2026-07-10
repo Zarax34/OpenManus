@@ -14,6 +14,7 @@ from app.tool.mcp import MCPClients, MCPClientTool
 from app.tool.python_execute import PythonExecute
 from app.tool.str_replace_editor import StrReplaceEditor
 from app.tool.skill import Skill
+from app.tool.task import Task
 
 
 class Manus(ToolCallAgent):
@@ -37,6 +38,7 @@ class Manus(ToolCallAgent):
             PythonExecute(),
             BrowserUseTool(),
             Skill(),
+            Task(),
             StrReplaceEditor(),
             AskHuman(),
             Terminate(),

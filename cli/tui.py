@@ -45,6 +45,7 @@ SLASH_COMMANDS = {
     "/connect": "Add a new provider",
     "/stats": "Show usage statistics",
     "/skill": "List or load a skill (/skill <name> to load)",
+    "/agents": "List available sub-agents for @mention",
 }
 
 
@@ -134,6 +135,19 @@ async def _handle_slash(cmd: str, args: str, session: "InteractiveSession") -> b
             print_info(f"Model: {_format_model(session._model)}")
             print_info(f"Session: {session.session_id[:8]}")
             print_info(f"Messages: {len(session.messages)}")
+            print_info("\nSub-agents (use @name to invoke):")
+            from app.tool.task import SUB_AGENTS
+            for name, info in SUB_AGENTS.items():
+                print(f"  @{name:<12} {info['description']}")
+            return True
+
+        case "/agents":
+            from app.tool.task import SUB_AGENTS
+            print()
+            for name, info in SUB_AGENTS.items():
+                print(f"  @{name:<12} {info['description']}")
+            print()
+            print_info("Use @name in your prompt to invoke a sub-agent")
             return True
 
         case "/connect":
@@ -262,8 +276,28 @@ class InteractiveSession:
                         break
                     continue
 
-                self.messages.append({"role": "user", "content": prompt})
-                await self._run_agent(prompt)
+                if "@" in prompt:
+                    from app.tool.task import SUB_AGENTS
+                    for name in SUB_AGENTS:
+                        mention = f"@{name}"
+                        if mention in prompt:
+                            task_prompt = prompt.replace(mention, "").strip()
+                            print_info(f"Invoking sub-agent @{name}...")
+                            result = await _handle_slash("/skill" if name == "skill" else "", "", self)
+                            from app.tool.task import Task
+                            t = Task()
+                            res = await t.execute(prompt=task_prompt or "Handle this task", agent=name)
+                            print(f"\n  @{name} result:\n{res}\n")
+                            self.messages.append({"role": "user", "content": prompt})
+                            self.messages.append({"role": "assistant", "content": f"[@{name}]: {res}"})
+                            save_session(self.session_id, self.messages)
+                            break
+                    else:
+                        self.messages.append({"role": "user", "content": prompt})
+                        await self._run_agent(prompt)
+                else:
+                    self.messages.append({"role": "user", "content": prompt})
+                    await self._run_agent(prompt)
         except KeyboardInterrupt:
             print_info("\nGoodbye!")
         finally:
