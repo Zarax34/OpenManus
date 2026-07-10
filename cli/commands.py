@@ -75,6 +75,16 @@ def _get_model_name() -> str:
 
 async def run_interactive(args):
     """Interactive REPL mode (default)"""
+    sid = None
+    fork = getattr(args, "fork", False) or False
+    if getattr(args, "continue_session", False) or getattr(args, "session", None):
+        from cli.session import list_sessions
+        sessions = list_sessions()
+        if sessions:
+            sid = getattr(args, "session", None) or sessions[0]["id"]
+    elif getattr(args, "session", None):
+        sid = args.session
+
     session = create_session_obj(
         auto_approve=args.auto,
         mini=args.mini,
@@ -82,6 +92,8 @@ async def run_interactive(args):
         agent_name=args.agent,
         model=args.model,
         pure=args.pure,
+        session_id=sid,
+        fork=fork,
     )
     await session.start()
 
@@ -96,8 +108,8 @@ async def run_single(args):
             print_error("No prompt provided.")
             return
 
-    session_id = create_session()
-    messages = [{"role": "user", "content": prompt}]
+    session_id = getattr(args, "session", None) or create_session()
+    messages = []
 
     try:
         from app.agent.manus import Manus
@@ -112,12 +124,22 @@ async def run_single(args):
         return
 
     try:
+        if getattr(args, "session", None):
+            from cli.session import get_session as gs
+            data = gs(args.session)
+            if data:
+                agent.messages = []
+                for m in data.get("messages", []):
+                    role = m.get("role", "user")
+                    content = m.get("content", "") or ""
+                    agent.update_memory(role, content)
+
         agent_name = args.agent or "Manus"
         model_name = args.model or _get_model_name()
         console.print(f"> {agent_name} \u00b7 {model_name}")
         result = await agent.run(prompt)
         text = str(result).strip() if result else ""
-        messages.append({"role": "assistant", "content": text})
+        messages = [m.to_dict() if hasattr(m, 'to_dict') else m for m in agent.memory.messages]
         save_session(session_id, messages)
         usage_stats.track_session()
         if text:
@@ -180,15 +202,7 @@ def cmd_session(args):
         if not data:
             print_error(f"Session '{args.session_id}' not found.")
             return
-        messages = data.get("messages", [])
-        last_user = next(
-            (m.get("content", "") for m in reversed(messages) if m.get("role") == "user"),
-            None,
-        )
-        if last_user:
-            print_info(f"Resuming session with: {last_user[:100]}...")
-        else:
-            print_warning("No user message found.")
+        print_info(f"Resume with: openmanus -s {data['id'][:8]}")
 
 
 def cmd_config(args):

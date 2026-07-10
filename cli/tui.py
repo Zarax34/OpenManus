@@ -8,7 +8,7 @@ import json
 from datetime import datetime
 from typing import Optional
 
-from cli.session import create_session, save_session, list_sessions, delete_session
+from cli.session import create_session, save_session, list_sessions, delete_session, get_session
 from cli.stats import usage_stats
 from cli.ui import (
     RICH_AVAILABLE, console, print_banner, print_thinking,
@@ -106,25 +106,26 @@ async def _handle_slash(cmd: str, args: str, session: "InteractiveSession") -> b
             return True
 
         case "/compact":
-            if len(session.messages) < 4:
+            msgs = session.agent.memory.messages if session.agent else []
+            if len(msgs) < 4:
                 print_info("Conversation too short to compact")
                 return True
             try:
                 from app.schema import Message
                 text = "\n".join(
-                    m.get("content", "") or ""
-                    for m in session.messages
-                    if m.get("role") in ("user", "assistant")
+                    (m.content or "") if hasattr(m, 'content') else (m.get("content", "") or "")
+                    for m in msgs
+                    if (getattr(m, 'role', None) or m.get("role")) in ("user", "assistant")
                 )
                 summary = await session.agent.llm.ask(
                     messages=[Message.user_message(
-                        f"Summarize this conversation concisely, keeping key details:\n\n{text[-3000:]}"
+                        f"Summarize this conversation concisely, keeping key details:\n\n{text[-4000:]}"
                     )],
                     stream=False,
                 )
-                session.messages = [
-                    {"role": "user", "content": f"Previous conversation summary:\n{summary}"}
-                ]
+                session.agent.memory.clear()
+                session.agent.update_memory("user", f"Previous conversation summary:\n{summary}")
+                session._sync_messages()
                 print_info("Conversation compacted")
             except Exception as e:
                 print_error(f"Compact failed: {e}")
@@ -206,17 +207,30 @@ async def _handle_slash(cmd: str, args: str, session: "InteractiveSession") -> b
 
 class InteractiveSession:
     def __init__(self, auto_approve: bool = False, mini: bool = False, no_replay: bool = False,
-                 agent_name: str = None, model: str = None, pure: bool = False):
+                 agent_name: str = None, model: str = None, pure: bool = False,
+                 session_id: str = None, fork: bool = False):
         self.auto_approve = auto_approve
         self.mini = mini
         self.no_replay = no_replay
         self.agent_name = agent_name or "Manus"
         self._model = model
         self.pure = pure
-        self.session_id = create_session()
+        self.fork = fork
         self.messages = []
         self.agent = None
         self.start_time = None
+
+        if session_id:
+            data = get_session(session_id)
+            if data:
+                self.session_id = data["id"]
+                self.messages = data.get("messages", [])
+                print_info(f"Resumed session {self.session_id[:8]}")
+            else:
+                print_error(f"Session '{session_id}' not found, starting new")
+                self.session_id = create_session()
+        else:
+            self.session_id = create_session()
 
     async def start(self):
         if self.mini:
@@ -235,6 +249,19 @@ class InteractiveSession:
         except Exception as e:
             print_error(f"Failed to initialize agent: {e}")
             return
+
+        if self.messages:
+            from app.schema import Message as Msg
+            for m in self.messages:
+                role = m.get("role", "user")
+                content = m.get("content", "") or ""
+                if role == "user":
+                    self.agent.update_memory("user", content)
+                elif role == "assistant":
+                    self.agent.update_memory("assistant", content)
+                elif role == "tool":
+                    self.agent.update_memory("tool", content, tool_call_id=m.get("tool_call_id", ""), name=m.get("name", ""))
+            self._sync_messages()
 
         if not self.mini:
             from app.schema import Message
@@ -293,10 +320,8 @@ class InteractiveSession:
                             save_session(self.session_id, self.messages)
                             break
                     else:
-                        self.messages.append({"role": "user", "content": prompt})
                         await self._run_agent(prompt)
                 else:
-                    self.messages.append({"role": "user", "content": prompt})
                     await self._run_agent(prompt)
         except KeyboardInterrupt:
             print_info("\nGoodbye!")
@@ -308,8 +333,6 @@ class InteractiveSession:
                 await self.agent.cleanup()
 
     async def _run_agent(self, prompt: str):
-        self.messages.append({"role": "user", "content": prompt})
-
         status = Live(Spinner("dots", text="", style="dim"), console=console, refresh_per_second=10)
         status.start()
 
@@ -317,7 +340,7 @@ class InteractiveSession:
             result = await asyncio.wait_for(self.agent.run(prompt), timeout=300)
             status.stop()
             text = str(result) if result else ""
-            self.messages.append({"role": "assistant", "content": text})
+            self._sync_messages()
             save_session(self.session_id, self.messages)
             if text:
                 print(text)
@@ -339,10 +362,19 @@ class InteractiveSession:
                 msg = f"Error: {err[:200]}"
             print_error(msg)
 
+    def _sync_messages(self):
+        """Sync TUI log from agent memory"""
+        if not self.agent:
+            return
+        self.messages = [m.to_dict() if hasattr(m, 'to_dict') else m for m in self.agent.memory.messages]
+        save_session(self.session_id, self.messages)
+
 
 def create_session_obj(auto_approve=False, mini=False, no_replay=False,
-                       agent_name=None, model=None, pure=False) -> InteractiveSession:
+                       agent_name=None, model=None, pure=False,
+                       session_id=None, fork=False) -> InteractiveSession:
     return InteractiveSession(
         auto_approve=auto_approve, mini=mini, no_replay=no_replay,
         agent_name=agent_name, model=model, pure=pure,
+        session_id=session_id, fork=fork,
     )
