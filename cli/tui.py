@@ -69,6 +69,29 @@ class InteractiveSession:
             print_error(f"Failed to initialize agent: {e}")
             return
 
+        if not self.mini:
+            print_info("Testing LLM connection...")
+            try:
+                from app.schema import Message
+                test = await asyncio.wait_for(
+                    self.agent.llm.ask(
+                        messages=[Message.user_message("respond with just 'ok'")],
+                        stream=False,
+                    ),
+                    timeout=15,
+                )
+                print_done("LLM connected")
+            except asyncio.TimeoutError:
+                print_warning("LLM connection timed out. Check the model name and API endpoint in config.")
+            except Exception as e:
+                err = str(e)
+                if "401" in err:
+                    print_error("Invalid API key. Run setup again: openmanus")
+                elif "404" in err or "not found" in err.lower():
+                    print_error(f"Model not found. Check model name in config/config.toml")
+                else:
+                    print_warning(f"LLM issue: {err[:100]}")
+
         if not self.no_replay and not self.mini:
             console.print("[dim]New session started[/]")
 
@@ -101,14 +124,27 @@ class InteractiveSession:
             console.print(Rule(style="dim"))
 
         try:
-            result = await self.agent.run(prompt)
+            result = await asyncio.wait_for(self.agent.run(prompt), timeout=300)
             self.messages.append({"role": "assistant", "content": str(result) if result else ""})
             save_session(self.session_id, self.messages)
+        except asyncio.TimeoutError:
+            msg = "Request timed out (300s). Check your API key and model name in config."
+            print_error(msg)
+            self.messages.append({"role": "assistant", "content": msg})
         except asyncio.CancelledError:
             print_warning("Task cancelled")
         except Exception as e:
-            print_error(f"Error: {e}")
-            self.messages.append({"role": "assistant", "content": f"Error: {e}"})
+            err = str(e)
+            if "401" in err or "Unauthorized" in err:
+                msg = "API key is invalid. Run setup again: openmanus"
+            elif "404" in err or "not found" in err.lower() or "model" in err.lower():
+                msg = f"Model not found. Check the model name in config/config.toml"
+            elif "timeout" in err.lower() or "timed out" in err.lower():
+                msg = "Request timed out. Check your API endpoint."
+            else:
+                msg = f"Error: {err[:200]}"
+            print_error(msg)
+            self.messages.append({"role": "assistant", "content": msg})
 
 
 class MiniSession(InteractiveSession):
