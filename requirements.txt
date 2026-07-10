@@ -22,6 +22,7 @@ duckduckgo_search~=7.5.3
 aiofiles~=24.1.0
 pydantic_core~=2.27.2
 colorama~=0.4.6
+rich~=13.9.0
 playwright~=1.51.0
 
 docker~=7.1.0

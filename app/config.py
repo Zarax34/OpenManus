@@ -106,7 +106,7 @@ class SandboxSettings(BaseModel):
 
 
 class DaytonaSettings(BaseModel):
-    daytona_api_key: str
+    daytona_api_key: Optional[str] = Field(None, description="Daytona API key")
     daytona_server_url: Optional[str] = Field(
         "https://app.daytona.io/api", description=""
     )
@@ -116,9 +116,6 @@ class DaytonaSettings(BaseModel):
         "/usr/bin/supervisord -n -c /etc/supervisor/conf.d/supervisord.conf",
         description="",
     )
-    # sandbox_id: Optional[str] = Field(
-    #     None, description="ID of the daytona sandbox to use, if any"
-    # )
     VNC_password: Optional[str] = Field(
         "123456", description="VNC password for the vnc service in sandbox"
     )
