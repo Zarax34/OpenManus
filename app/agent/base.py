@@ -148,10 +148,9 @@ class BaseAgent(BaseModel, ABC):
 
                 results.append(f"Step {self.current_step}: {step_result}")
 
-            if self.current_step >= self.max_steps:
-                self.current_step = 0
+            self.current_step = 0
+            if self.state != AgentState.IDLE:
                 self.state = AgentState.IDLE
-                results.append(f"Terminated: Reached max steps ({self.max_steps})")
         await _get_sandbox_client().cleanup()
         return "\n".join(results) if results else "No steps executed"
 
