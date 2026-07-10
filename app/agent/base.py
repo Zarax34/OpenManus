@@ -146,13 +146,21 @@ class BaseAgent(BaseModel, ABC):
                 if self.is_stuck():
                     self.handle_stuck_state()
 
-                results.append(f"Step {self.current_step}: {step_result}")
+                results.append(step_result)
+
+            # Return last step result on success, full log otherwise
+            output = results[-1] if results else ""
+            if self.state == AgentState.FINISHED and len(results) > 1:
+                output = results[-1]
+            elif self.state != AgentState.FINISHED and len(results) > 1:
+                output = "\n".join(results)
 
             self.current_step = 0
             if self.state != AgentState.IDLE:
                 self.state = AgentState.IDLE
+
         await _get_sandbox_client().cleanup()
-        return "\n".join(results) if results else "No steps executed"
+        return output
 
     @abstractmethod
     async def step(self) -> str:
