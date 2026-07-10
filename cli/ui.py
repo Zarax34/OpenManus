@@ -282,17 +282,72 @@ def print_export_result(session_id: str, path: str):
         print(f"Exported session {session_id[:8]} to {path}")
 
 
-def input_with_prompt(prompt: str = ">", allow_empty=False) -> str:
-    if RICH_AVAILABLE:
-        try:
-            result = Prompt.ask(f"[bold]{prompt}[/]")
-            return result
-        except (EOFError, KeyboardInterrupt):
-            return ""
+SLASH_COMMANDS_HELP = [
+    ("/help", "Show available slash commands"),
+    ("/new", "Start a new session"),
+    ("/pick", "Interactive session picker"),
+    ("/sessions", "List all sessions"),
+    ("/exit", "Exit OpenManus"),
+    ("/clear", "Clear the terminal screen"),
+    ("/models", "List configured models"),
+    ("/agent", "Show current agent info"),
+    ("/agents", "List available sub-agents"),
+    ("/skill", "List or load a skill"),
+    ("/connect", "Add a new provider"),
+    ("/export", "Export session as JSON"),
+    ("/compact", "Summarize conversation"),
+    ("/stats", "Show usage statistics"),
+]
+
+
+def _setup_readline():
     try:
-        return input(f"{prompt} ")
+        import readline
+        import rlcompleter
+
+        def completer(text, state):
+            if text.startswith("/"):
+                matches = [c for c, _ in SLASH_COMMANDS_HELP if c.startswith(text)]
+                return matches[state] if state < len(matches) else None
+            return None
+
+        readline.set_completer(completer)
+        readline.parse_and_bind("tab: complete")
+    except ImportError:
+        pass
+
+
+def input_with_prompt(prompt: str = ">", allow_empty=False) -> str:
+    try:
+        import readline
+        cmds = [c for c, _ in SLASH_COMMANDS_HELP]
+        def complete(text, state):
+            if state == 0:
+                if text.startswith("/"):
+                    matches[:] = [c for c in cmds if c.startswith(text)]
+                else:
+                    matches[:] = []
+            return matches[state] if state < len(matches) else None
+        matches = []
+        readline.set_completer(complete)
+        readline.parse_and_bind("tab: complete")
+    except ImportError:
+        pass
+
+    try:
+        result = input(f"> ")
     except (EOFError, KeyboardInterrupt):
         return ""
+    if result == "/":
+        print()
+        for cmd, desc in SLASH_COMMANDS_HELP:
+            print(f"  {cmd:<18} {desc}")
+        print()
+        try:
+            result = input(f"> ")
+        except (EOFError, KeyboardInterrupt):
+            return ""
+    return result
 
 
 def confirm_action(message: str, default: bool = True) -> bool:
