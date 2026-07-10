@@ -39,6 +39,7 @@ SLASH_COMMANDS = {
     "/clear": "Clear the terminal screen",
     "/models": "List configured models",
     "/sessions": "List all sessions",
+    "/pick": "Interactive session picker",
     "/export": "Export current session as JSON",
     "/compact": "Summarize conversation to save tokens",
     "/agent": "Show current agent info",
@@ -54,6 +55,31 @@ def _format_model(model: str) -> str:
         parts = model.split("/", 1)
         return parts[1] if parts[0] in ("z-ai",) else model
     return model or "unknown"
+
+
+def _load_session(session: "InteractiveSession", sid: str):
+    """Switch the active session to an existing one."""
+    data = get_session(sid)
+    if not data:
+        print_error(f"Session '{sid[:8]}' not found")
+        return
+    session.session_id = data["id"]
+    session.messages = data.get("messages", [])
+    if session.agent:
+        session.agent.memory.clear()
+        from app.schema import Message as Msg
+        for m in session.messages:
+            role = m.get("role", "user")
+            content = m.get("content", "") or ""
+            if role == "user":
+                session.agent.update_memory("user", content)
+            elif role == "assistant":
+                session.agent.update_memory("assistant", content)
+            elif role == "tool":
+                session.agent.update_memory("tool", content,
+                    tool_call_id=m.get("tool_call_id", ""),
+                    name=m.get("name", ""))
+    print_info(f"Switched to session {sid[:8]} ({len(session.messages)} messages)")
 
 
 async def _handle_slash(cmd: str, args: str, session: "InteractiveSession") -> bool:
@@ -94,6 +120,26 @@ async def _handle_slash(cmd: str, args: str, session: "InteractiveSession") -> b
                 print_info("No sessions found.")
             else:
                 print_sessions_table(sessions)
+            return True
+
+        case "/pick":
+            all_sessions = list_sessions()
+            if not all_sessions:
+                print_info("No sessions found")
+                return True
+            print()
+            for i, s in enumerate(all_sessions[:20], 1):
+                sid = s["id"][:8]
+                preview = (s.get("preview", "") or "New session")[:50].replace("\n", " ")
+                msg_count = s.get("message_count", 0)
+                print(f"  [{i}] {sid:<12} {msg_count:>3} msgs  {preview}")
+            print()
+            choice = input(f"  Pick session [1-{min(len(all_sessions), 20)}] or Enter to cancel: ").strip()
+            if choice.isdigit():
+                idx = int(choice) - 1
+                if 0 <= idx < len(all_sessions):
+                    sid = all_sessions[idx]["id"]
+                    _load_session(session, sid)
             return True
 
         case "/export":
