@@ -196,6 +196,10 @@ class InteractiveSession:
             await self._handle_slash(cmd, args)
             return True
 
+        if not self.agent:
+            self._add_msg("class:error.msg", "  Agent not initialized. Check config.")
+            return True
+
         if "@" in text:
             from app.tool.task import SUB_AGENTS
             for name in SUB_AGENTS:
@@ -215,12 +219,18 @@ class InteractiveSession:
                         self._add_msg("class:error.msg", f"  @{name} failed: {e}")
                     return True
 
-        get_app().create_background_task(self._run_agent(text))
+        self._input_field.read_only = True
+        self._thinking = True
+        self._invalidate()
+        try:
+            await self._run_agent(text)
+        finally:
+            self._thinking = False
+            self._input_field.read_only = False
+            self._invalidate()
         return True
 
     async def _run_agent(self, text: str):
-        self._thinking = True
-        self._invalidate()
         try:
             result = await asyncio.wait_for(self.agent.run(text), timeout=300)
             out = str(result) if result else ""
@@ -243,9 +253,6 @@ class InteractiveSession:
             else:
                 msg = f"Error: {err[:200]}"
             self._add_msg("class:error.msg", f"  {msg}")
-        finally:
-            self._thinking = False
-            self._invalidate()
 
     async def _handle_slash(self, cmd: str, args: str):
         match cmd:
