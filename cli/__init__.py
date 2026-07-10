@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import asyncio
+import shutil
 import sys
 
 import os
@@ -31,13 +32,113 @@ from cli.commands import (
 from cli.setup import is_first_run, run_setup
 from cli.ui import print_banner, print_info, print_error
 
+BANNER = r"""
+   ⠀                                ▄
+   █▀▀█ █▀▀█ █▀▀█ █▀▀▄ █▀▀▀ █▀▀█ █▀▀█ █▀▀█
+   █  █ █  █ █▀▀▀ █  █ █    █  █ █  █ █▀▀▀
+   ▀▀▀▀ █▀▀▀ ▀▀▀▀ ▀  ▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀
+"""
+
+
+class CustomHelpAction(argparse.Action):
+    def __call__(self, parser, namespace, values, option_string=None):
+        _print_help(parser)
+        sys.exit(0)
+
+
+def _print_help(parser):
+    cols = shutil.get_terminal_size().columns
+    margin = 2
+    cmd_col = 20
+    max_desc = cols - margin - cmd_col - margin - margin
+
+    print(BANNER)
+    print("Commands:")
+
+    commands = [
+        ("completion", "generate shell completion script"),
+        ("config", "show configuration"),
+        ("debug", "debugging and troubleshooting tools"),
+        ("mcp", "manage MCP servers"),
+        ("models [provider]", "list all available models"),
+        ("plugin <module>", "install plugin and update config", "plug"),
+        ("providers", "manage AI providers and credentials", "auth"),
+        ("agent", "manage agents"),
+        ("session", "manage sessions"),
+        ("stats", "show token usage and cost statistics"),
+        ("serve", "starts a headless OpenManus server"),
+        ("web", "start OpenManus server and open web interface"),
+        ("run [message..]", "run OpenManus with a message"),
+        ("attach <url>", "attach to a running OpenManus server"),
+        ("export [sessionID]", "export session data as JSON"),
+        ("import <file>", "import session data from JSON file or URL"),
+        ("upgrade [target]", "upgrade OpenManus to the latest or a specific version"),
+        ("uninstall", "uninstall OpenManus and remove all related files"),
+        ("db", "database tools"),
+        ("version", "show version information"),
+    ]
+
+    for entry in commands:
+        cmd = entry[0]
+        desc = entry[1]
+        alias = entry[2] if len(entry) > 2 else None
+        if alias:
+            desc += f"  [aliases: {alias}]"
+        padded = cmd.ljust(cmd_col)
+        print(f"  openmanus {padded}  {desc}")
+
+    print()
+    print("Positionals:")
+    print(f"  {'project':<{cmd_col}}  {'path to start openmanus in':<{max_desc}}  [string]")
+
+    print()
+    print("Options:")
+    options = [
+        ("-h, --help", "show help", "[boolean]"),
+        ("-v, --version", "show version number", "[boolean]"),
+        ("--print-logs", "print logs to stderr", "[boolean]"),
+        ("--log-level", "log level", "[string] [choices: \"DEBUG\", \"INFO\", \"WARN\", \"ERROR\"]"),
+        ("--pure", "run without external plugins", "[boolean]"),
+        ("--port", "port to listen on", "[number] [default: 0]"),
+        ("--hostname", "hostname to listen on", '[string] [default: "127.0.0.1"]'),
+        ("--mdns", "enable mDNS service discovery (defaults hostname to 0.0.0.0)", "[boolean] [default: false]"),
+        ("--mdns-domain", "custom domain name for mDNS service", '[string] [default: "openmanus.local"]'),
+        ("--cors", "additional domains to allow for CORS", "[array] [default: []]"),
+        ("-m, --model", "model to use in the format of provider/model", "[string]"),
+        ("-c, --continue", "continue the last session", "[boolean]"),
+        ("-s, --session", "session id to continue", "[string]"),
+        ("--fork", "fork the session when continuing (use with --continue or --session)", "[boolean]"),
+        ("--prompt", "prompt to use", "[string]"),
+        ("--agent", "agent to use", "[string]"),
+        ("--auto", "auto-approve permissions that are not explicitly denied (dangerous!)", "[boolean] [default: false]"),
+        ("--mini", "start the minimal interactive interface", "[boolean] [default: false]"),
+        ("--no-replay", "disable mini session history replay on resume and after resize", "[boolean]"),
+        ("--replay-limit", "cap visible mini replay to the newest N messages", "[number]"),
+    ]
+
+    opt_col = max(len(o[0]) for o in options) + 2
+    annot_col = max(len(o[2]) for o in options) + 1
+    desc_col = cols - margin - opt_col - margin - annot_col - margin
+    if desc_col < 20:
+        desc_col = 20
+    for flag, desc, annotation in options:
+        padded = flag.ljust(opt_col)
+        desc_short = desc[:desc_col] if len(desc) > desc_col else desc
+        print(f"  {padded}  {desc_short:<{desc_col}}  {annotation}")
+
+    print()
+    print("Run 'openmanus <command> --help' for more details on a command.")
+
 
 def build_parser():
     parser = argparse.ArgumentParser(
         prog="openmanus",
+        usage=argparse.SUPPRESS,
         description="OpenManus - Open source AI agent for general-purpose tasks",
         epilog="Run 'openmanus <command> --help' for more details on a command.",
+        add_help=False,
     )
+    parser.add_argument("-h", "--help", action=CustomHelpAction, nargs=0, help="show help")
 
     # Global options
     parser.add_argument(
@@ -285,7 +386,6 @@ async def async_main():
     if args.log_level:
         from app.logger import define_log_level
         define_log_level(print_level=args.log_level)
-        print_info(f"Log level set to: {args.log_level}")
 
     # Default: interactive mode
     if not args.command:

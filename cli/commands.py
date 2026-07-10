@@ -60,6 +60,19 @@ from cli.completion import (
 )
 
 
+def _get_model_name() -> str:
+    try:
+        from app.config import config
+        default = config.llm.get("default")
+        if default:
+            return default.model or "unknown"
+        for v in config.llm.values():
+            return v.model or "unknown"
+    except Exception:
+        pass
+    return "unknown"
+
+
 async def run_interactive(args):
     """Interactive REPL mode (default)"""
     session = create_session_obj(
@@ -99,15 +112,18 @@ async def run_single(args):
         return
 
     try:
-        print_info("Processing your request...")
+        agent_name = args.agent or "Manus"
+        model_name = args.model or _get_model_name()
+        console.print(f"> {agent_name} \u00b7 {model_name}")
         result = await agent.run(prompt)
-        if result:
-            messages.append({"role": "assistant", "content": str(result)})
-        print_done("Done")
+        text = str(result).strip() if result else ""
+        messages.append({"role": "assistant", "content": text})
         save_session(session_id, messages)
         usage_stats.track_session()
+        if text:
+            console.print(text)
     except KeyboardInterrupt:
-        print_info("\nInterrupted.")
+        pass
     finally:
         await agent.cleanup()
 
@@ -262,10 +278,9 @@ def cmd_version(args):
 
     from app.config import config
 
-    print_banner()
-    print_info(f"Version: {ver}")
-    print_info(f"Python: {sys.version.split()[0]}")
-    print_info(f"Config: {config._get_config_path()}")
+    console.print(f"> v{ver}")
+    console.print(f"  Python: {sys.version.split()[0]}")
+    console.print(f"  Config: {config._get_config_path()}")
 
 
 async def cmd_mcp(args):
